@@ -1,0 +1,153 @@
+
+
+```{r package-loading, echo=FALSE, results='hide', warning=FALSE, message=FALSE}
+
+# Load necessary packages
+library(pheatmap)
+library(RColorBrewer)
+
+if (!require("dplyr")) install.packages(dplyr); library(dplyr)
+library(ggplot2)
+
+library("DESeq2")
+
+# Used for gene-set enrichment analysis
+if (!require("GO.db")) { # Gene Ontology interface
+  if (!require("BiocManager")) install.packages("BiocManager")
+  BiocManager::install("GO.db")
+}
+if (!require("org.Hs.eg.db")) { # Homo Sapien gene annotations
+  if (!require("BiocManager")) install.packages("BiocManager")
+  BiocManager::install("org.Hs.eg.db")
+}
+# install.packages("/mnt/hdd/Allez", repos = NULL, type = "source")
+devtools::install("/mnt/hdd/Allez")
+library(allez)
+```
+
+```{r}
+df.raw <- read.csv("/mnt/hdd/newton/patankar/rnaseq/novo-expression.matrix", sep = "\t")
+row.names(df.raw) <- df.raw[,1]
+
+cts <- as.matrix(df.raw[,-c(1, 31, 30, 29)])
+cts <- round(cts)
+
+coldata <- data.frame(
+  treatment = c(rep("DMSO", 9), rep("IC50", 9), rep("IC75", 9)),
+  time = rep(c(1,1,1,24,24,24,8,8,8), 3),
+  group = rep(c("b", "c", "a"), 9),
+  batch = rep(c("May", "May", "March"), 9)
+)
+coldata$time <- factor(coldata$time, levels = c(1,8,24))
+coldata$treatment <- factor(coldata$treatment, levels = c("DMSO", "IC50", "IC75"))
+coldata$group <- factor(coldata$group, levels = c("a", "b", "c"))
+coldata$batch <- factor(coldata$batch, levels = c("March", "May"))
+
+deseq_df <- DESeqDataSetFromMatrix(
+  countData = cts,
+  colData = coldata,
+  design = ~ treatment * time + group
+)
+dds <- DESeq(deseq_df, reduced = ~ time + group, test = "LRT")
+```
+
+```{r thetahat-allez, echo=FALSE, warning=FALSE, message=FALSE}
+allez.data <- as.data.frame(results(dds)) %>% mutate(x = log2FoldChange)
+allez_bin.data <- as.data.frame(results(dds)) %>% mutate(x = padj < 0.01)
+allez.names <- rownames(allez.data)
+allez.data <- as.numeric(allez.data$x)
+allez_bin.data <- as.numeric(allez_bin.data$x)
+names(allez.data) <- allez.names
+names(allez_bin.data) <- allez.names
+
+# Fitting using log2fold-change
+
+# Throws error as data contains NA's
+tryCatch({
+  allez.out <- allez(
+    allez.data,
+    "org.Hs.eg",
+    idtype = "SYMBOL",
+    transform = "nscore"
+  )},
+ finally = {
+
+  # No longer throws that error
+  allez.data[is.na(allez.data)] <- 0
+  allez.out <- allez(
+    allez.data,
+    "org.Hs.eg",
+    idtype = "SYMBOL",
+    transform = "nscore"
+  )
+})
+
+# Fitting using padj < 0.01
+
+# Throws error as data contains NA's
+tryCatch({
+  allez_bin.out <- allez(
+    allez_bin.data,
+    "org.Hs.eg",
+    idtype = "SYMBOL"
+  )},
+ finally = {
+
+  # No longer throws that error
+  allez_bin.data[is.na(allez_bin.data)] <- 0
+  allez_bin.out <- allez(
+    allez_bin.data,
+    "org.Hs.eg",
+    idtype = "SYMBOL"
+  )
+})
+
+```
+
+```{r}
+# This lists all genes in the set
+allez.tab <- allezTable(allez.out, symbol = TRUE, n.upp = 500, nominal.alpha = 0.1)
+allez.tab
+
+
+# Now this lists all genes in the set, and specifically those with gscore > 1 (i.e. > 2-fold change)
+allez.tab <- allezTable(allez.out, n.cell = 0, symbol = TRUE, n.upp = 500, nominal.alpha = 0.1, score.threshold = 1)
+allez.tab <- allez.tab[order(allez.tab$z.score, decreasing = T),]
+allez.tab
+```
+
+
+```{r}
+# This only lists all genes in the set - whoops, no it doesn't. TODO
+allez_bin.tab <- allezTable(allez_bin.out, symbol = TRUE, n.upp = 500, nominal.alpha = 0.1)
+allez_bin.tab
+
+
+# Now this lists all genes in the set with gscore > 0 (i.e. padj < 0.01)
+allez_bin.tab <- allezTable(allez_bin.out, n.cell = 0, symbol = TRUE, n.upp = 500, nominal.alpha = 0.1, score.threshold = 0)
+allez_bin.tab <- allez_bin.tab[order(allez_bin.tab$z.score, decreasing = T),]
+allez_bin.tab
+```
+
+
+```{r}
+library(ggplot2)
+allezPlot(allez.out, n.cell = 0, nominal.alpha = 0.1) + 
+  scale_color_gradient(low = "#FFFFFF00", high = "#000000FF")+ 
+  scale_fill_gradient(low = "#FFFFFF00", high = "#000000FF") +
+  scale_x_continuous(expand=c(0,0), limits = c(0,500)) + 
+  ylab("")
+
+allezPlot(allez_bin.out, n.cell = 0, nominal.alpha = 0.1, size = 2.5) + 
+  scale_color_gradient(low = "#FFFFFF00", high = "#000000FF")+ 
+  scale_fill_gradient(low = "#FFFFFF00", high = "#000000FF") +
+  scale_x_continuous(expand=c(0,0), limits = c(0,1000)) + 
+  ylab("")
+```
+
+```{r}
+
+```
+
+
+
