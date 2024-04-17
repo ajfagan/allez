@@ -1,0 +1,73 @@
+
+```{r}
+library(KEGGREST)
+library(DESeq2)
+library(dplyr)
+library(org.Hs.eg.db)
+
+listDatabases()
+```
+
+```{r data-loading}
+df.raw <- read.csv("/mnt/hdd/newton/patankar/rnaseq/novo-expression.matrix", sep = "\t")
+row.names(df.raw) <- df.raw[,1]
+
+cts <- as.matrix(df.raw[,-c(1, 31, 30, 29)])
+cts <- round(cts)
+
+coldata <- data.frame(
+  treatment = c(rep("DMSO", 9), rep("IC50", 9), rep("IC75", 9)),
+  time = rep(c(1,1,1,24,24,24,8,8,8), 3),
+  group = rep(c("b", "c", "a"), 9),
+  batch = rep(c("May", "May", "March"), 9)
+)
+coldata$time <- factor(coldata$time, levels = c(1,8,24))
+coldata$treatment <- factor(coldata$treatment, levels = c("DMSO", "IC50", "IC75"))
+coldata$group <- factor(coldata$group, levels = c("a", "b", "c"))
+coldata$batch <- factor(coldata$batch, levels = c("March", "May"))
+
+deseq_df <- DESeqDataSetFromMatrix(
+  countData = cts,
+  colData = coldata,
+  design = ~ treatment * time + group
+)
+dds <- DESeq(deseq_df, reduced = ~ time + group, test = "LRT")
+```
+
+
+The KEGG database lists 359 gene sets among 8_753 genes, for a total of 36958 unique entries.
+In total, it has 24_689 genes.
+Of the 18_944 Entrez identifiers from above, 18_316 are contained in this list.
+Of the 8_753 genes in gene sets, only 8_325 are from the 18_944 available Entrez identifiers
+
+```{r}
+entrez.genes <- mapIds(org.Hs.eg.db, keys = rownames(results(dds)), column = "ENTREZID", keytype="ALIAS")
+
+# Gets a vector of human genes and the name is an associated pathway
+# - Contains 359 gene sets
+# - Contains 8753 genes
+hs <- keggLink("hsa", "pathway")
+
+# Gets a vector of human genes - length 24|689
+all.hs.genes <- keggList("hsa")
+
+# Converts Entrez IDs to Kegg Ids
+kegg.genes <- paste("hsa:", entrez.genes, sep = "")
+length((entrez.genes))
+
+sum(names(all.hs.genes) %in% kegg.genes)
+sum(kegg.genes %in% hs)
+```
+
+
+```{r}
+length(unique(kegg.genes[!(kegg.genes %in% hs)]))
+
+```
+
+
+
+
+
+
+

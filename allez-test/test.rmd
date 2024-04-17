@@ -63,44 +63,42 @@ names(allez_bin.data) <- allez.names
 # Fitting using log2fold-change
 
 # Throws error as data contains NA's
-tryCatch({
-  allez.out <- allez(
-    allez.data,
-    "org.Hs.eg",
-    idtype = "SYMBOL",
-    transform = "nscore"
-  )},
- finally = {
+# allez.out <- allez(
+#   allez.data,
+#   "org.Hs.eg",
+#   idtype = "SYMBOL",
+#   transform = "nscore"
+# )
 
-  # No longer throws that error
-  allez.data[is.na(allez.data)] <- 0
-  allez.out <- allez(
-    allez.data,
-    "org.Hs.eg",
-    idtype = "SYMBOL",
-    transform = "nscore"
-  )
-})
+# No longer throws that error
+allez.data[is.na(allez.data)] <- 0
+allez.out <- allez(
+  allez.data,
+  "org.Hs.eg",
+  idtype = "SYMBOL",
+  transform = "nscore"
+)
+```
 
+
+```{r}
 # Fitting using padj < 0.01
 
 # Throws error as data contains NA's
-tryCatch({
-  allez_bin.out <- allez(
-    allez_bin.data,
-    "org.Hs.eg",
-    idtype = "SYMBOL"
-  )},
- finally = {
+# allez_bin.out <- allez(
+#   allez_bin.data,
+#   "org.Hs.eg",
+#   idtype = "SYMBOL"
+# )
 
-  # No longer throws that error
-  allez_bin.data[is.na(allez_bin.data)] <- 0
-  allez_bin.out <- allez(
-    allez_bin.data,
-    "org.Hs.eg",
-    idtype = "SYMBOL"
-  )
-})
+
+# No longer throws that error
+allez_bin.data[is.na(allez_bin.data)] <- 0
+allez_bin.out <- allez(
+  allez_bin.data,
+  "org.Hs.eg",
+  idtype = "SYMBOL"
+)
 
 ```
 
@@ -133,20 +131,10 @@ allez_bin.tab
 ```{r}
 library(ggplot2)
 allezPlot(allez.out, n.cell = 0, nominal.alpha = 0.1) + 
-  scale_color_gradient(low = "#FFFFFF00", high = "#000000FF")+ 
-  scale_fill_gradient(low = "#FFFFFF00", high = "#000000FF") +
-  scale_x_continuous(expand=c(0,0), limits = c(0,500)) + 
-  ylab("")
+  scale_x_continuous(expand=c(0,0), limits = c(0,500))
 
-allezPlot(allez_bin.out, n.cell = 0, nominal.alpha = 0.1, size = 2.5) + 
-  scale_color_gradient(low = "#FFFFFF00", high = "#000000FF")+ 
-  scale_fill_gradient(low = "#FFFFFF00", high = "#000000FF") +
-  scale_x_continuous(expand=c(0,0), limits = c(0,1000)) + 
-  ylab("")
-```
-
-```{r}
-
+allezPlot(allez_bin.out, n.cell = 0, nominal.alpha = 0.1, size = 2.5) +
+  scale_x_continuous(expand=c(0,0), limits = c(0,1000))
 ```
 
 

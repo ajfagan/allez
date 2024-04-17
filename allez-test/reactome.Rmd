@@ -1,0 +1,229 @@
+---
+title: Investigating adding reactome to Allez
+author: AJ Fagan
+---
+# Preamble
+
+## Loading packages
+
+```{r preamble, warning = F, message=FALSE}
+library(reactome.db)
+library(org.Hs.eg.db)
+library(clusterProfiler)
+library(DESeq2)
+
+printf <- function(...) print(sprintf(...))
+```
+
+## Running RNAseq for example data
+
+```{r data-loading}
+df.raw <- read.csv("/mnt/hdd/newton/patankar/rnaseq/novo-expression.matrix", sep = "\t")
+row.names(df.raw) <- df.raw[,1]
+
+cts <- as.matrix(df.raw[,-c(1, 31, 30, 29)])
+cts <- round(cts)
+
+coldata <- data.frame(
+  treatment = c(rep("DMSO", 9), rep("IC50", 9), rep("IC75", 9)),
+  time = rep(c(1,1,1,24,24,24,8,8,8), 3),
+  group = rep(c("b", "c", "a"), 9),
+  batch = rep(c("May", "May", "March"), 9)
+)
+coldata$time <- factor(coldata$time, levels = c(1,8,24))
+coldata$treatment <- factor(coldata$treatment, levels = c("DMSO", "IC50", "IC75"))
+coldata$group <- factor(coldata$group, levels = c("a", "b", "c"))
+coldata$batch <- factor(coldata$batch, levels = c("March", "May"))
+
+deseq_df <- DESeqDataSetFromMatrix(
+  countData = cts,
+  colData = coldata,
+  design = ~ treatment * time + group
+)
+dds <- DESeq(deseq_df, reduced = ~ time + group, test = "LRT")
+```
+
+# Body
+
+## Pulling up Reactome data
+
+
+Looking at what occurs when trying to convert this data into reactome.
+Reactome requires genes to be given by Entrez ID, and some symbols in our data cannot be mapped as such.
+1_900 of the total 19_084 genes (9.96%) cannot be mapped in this way.
+Of the 1_771 "active" genes, 142 (8.02%) cannot be mapped in this way.
+
+
+```{r}
+
+# 1903 "NA" maps, strangely
+entrez.genes <- mapIds(org.Hs.eg.db, keys = rownames(results(dds)), column = "ENTREZID", keytype="SYMBOL")
+entrez.genes <- entrez.genes[!is.na(entrez.genes)]
+
+# Convert gene symbols to entrezid
+# 1900 failed to map, 3 fewer, somehow - oh, duplicates
+# genes.map <- bitr(rownames(results(dds)), fromType = "SYMBOL", toType = "ENTREZID", OrgDb = "org.Hs.eg.db")
+# entrez.genes <- genes.map$ENTREZID
+# names(entrez.genes) <- genes.map$SYMBOL
+
+# Get list of reactome pathways, and associated genes
+genesets <- as.list(reactomePATHID2EXTID)
+
+# Keep only those genes present in our data
+for (g in 1:length(genesets)) {
+  all_genes <- genesets[[g]]
+  genesets[[g]] <- all_genes[all_genes %in% entrez.genes]
+}
+
+# Which genes are in any set?
+genesinsets <- unique(Reduce(c, genesets))
+
+allez.data <- results(dds)$padj
+allez.data <- !is.na(allez.data) & allez.data < 0.01
+names(allez.data) <- rownames(results(dds))
+entrez.data <- allez.data[which(names(allez.data) %in% names(entrez.genes))]
+names(entrez.data) <- entrez.genes[names(entrez.data)]
+inset.data <- entrez.data[genesinsets]
+
+printf("There are %d genes in our data", nrow(results(dds)))
+printf("There are %d genes in our data with a valid entrezid", length(entrez.genes))
+printf("There are %d genes in our data with a valid entrezid and are contained in at least 1 reactome gene set", length(genesinsets))
+
+printf("There are %d active genes in our data", sum(allez.data))
+printf("There are %d active genes in our data with a valid entrezid", sum(entrez.data))
+printf("There are %d active genes in our data with a valid entrezid and are contained in at least 1 reactome gene set", sum(inset.data))
+```
+
+It seems we need to use ALIAS instead of SYMBOL to get some genes.
+In so doing, we cut the 1903 missing genes down to only 140.
+Note, the current implementation of Allez uses SYMBOL.
+The 140 missing genes can be found at the bottom of this document.
+
+```{r}
+# map from symbol to entrez id
+entrez.genes <- mapIds(org.Hs.eg.db, keys = rownames(results(dds)), column = "ENTREZID", keytype="SYMBOL")
+# map from alias to entrez id
+entrez.genes2 <- mapIds(org.Hs.eg.db, keys = rownames(results(dds)), column = "ENTREZID", keytype="ALIAS")
+
+# proportion the latter that is also missing from the former
+mean(is.na(entrez.genes[names(entrez.genes2[is.na(entrez.genes2)])]))
+
+# All genes missing in the latter are also lacking in the former. 
+# In addition, the latter has fewer misses, only 140, compared to 1903
+c(
+  sum(is.na(entrez.genes)),
+  sum(is.na(entrez.genes2))
+)
+```
+
+
+Re-running with ALIAS. However, now we also see that there are 420 Entrez ID's with multiple aliases, each of which is contained within our dataset. 
+In other words, our data seems to have multiple instances of 420 genes, each with different aliases.
+
+```{r}
+
+# 140 "NA" maps, which is better
+entrez.genes <- mapIds(org.Hs.eg.db, keys = rownames(results(dds)), column = "ENTREZID", keytype="ALIAS")
+entrez.genes <- entrez.genes[!is.na(entrez.genes)]
+length(entrez.genes) - length(unique(entrez.genes))
+
+# Get list of reactome pathways, and associated genes
+genesets <- as.list(reactomePATHID2EXTID)
+
+# Keep only those genes present in our data
+for (g in 1:length(genesets)) {
+  all_genes <- genesets[[g]]
+  genesets[[g]] <- all_genes[all_genes %in% entrez.genes]
+}
+
+# Which genes are in any set?
+genesinsets <- unique(Reduce(c, genesets))
+
+allez.data <- results(dds)$padj
+allez.data <- !is.na(allez.data) & allez.data < 0.01
+names(allez.data) <- rownames(results(dds))
+entrez.data <- allez.data[which(names(allez.data) %in% names(entrez.genes))]
+names(entrez.data) <- entrez.genes[names(entrez.data)]
+inset.data <- entrez.data[genesinsets]
+
+printf("There are %d genes in our data", nrow(results(dds)))
+printf("There are %d genes in our data with a valid entrezid", length(entrez.genes))
+printf("There are %d genes in our data with a valid entrezid and are contained in at least 1 reactome gene set", length(genesinsets))
+
+printf("There are %d active genes in our data", sum(allez.data))
+printf("There are %d active genes in our data with a valid entrezid", sum(entrez.data))
+printf("There are %d active genes in our data with a valid entrezid and are contained in at least 1 reactome gene set", sum(inset.data))
+```
+
+
+## Pulling up GO data for comparison
+
+For GO, we don't need to convert to Entrez ID
+
+```{r}
+
+go.genesetmap <- AnnotationDbi::select(org.Hs.eg.db, keys = rownames(results(dds)), keytype = "SYMBOL", columns = c("GO", "SYMBOL"))
+go.genesetmap <- go.genesetmap[complete.cases(go.genesetmap),]
+
+# Which genes are in any set?
+go.genesinsets <- unique(go.genesetmap$SYMBOL)
+
+go.allez.data <- results(dds)$padj
+go.allez.data <- !is.na(go.allez.data) & go.allez.data < 0.01
+names(go.allez.data) <- rownames(results(dds))
+
+go.inset.data <- go.allez.data[go.genesinsets]
+
+printf("There are %d genes in our data", nrow(results(dds)))
+printf("There are %d genes in our data which are contained in at least 1 GO gene set", length(go.genesinsets))
+
+printf("There are %d active genes in our data", sum(go.allez.data))
+printf("There are %d active genes in our data which are contained in at least 1 GO gene set", sum(go.inset.data))
+```
+
+
+The GO database has more genes present in sets than the Reactome database.
+
+
+```{r}
+printf(
+  "There are %d genes missing from Reactome sets", 
+  length(entrez.genes[!(entrez.genes %in% genesinsets)])
+)
+printf(
+  "There are %d genes missing from GO sets", 
+  length(entrez.genes[!(entrez.genes %in% entrez.genes[go.genesinsets])])
+)
+printf(
+  "There are %d genes missing from both sets", 
+  length(entrez.genes[!(entrez.genes %in% genesinsets) & !(entrez.genes %in% entrez.genes[go.genesinsets])])
+)
+```
+
+
+# Supplmentary material
+
+## Unmappeable active genes - 2
+
+These are the active genes which cannot be mapped to an Entrez ID.
+
+```{r active-misses}
+all.active <- names(allez.data[which(allez.data)])
+all.active[!(all.active %in% names(entrez.genes[all.active]))]
+```
+
+## All unmappeable genes - 140
+
+```{r all-misses}
+names(allez.data)[!(names(allez.data) %in% names(entrez.genes))]
+```
+
+
+
+
+
+
+
+
+
+
