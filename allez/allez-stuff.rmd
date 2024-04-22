@@ -4,6 +4,41 @@ output: html_document
 date: "2024-04-22"
 ---
 
+# Genes missing from Allez
+
+```{r}
+library(org.Hs.eg.db)
+genes <- read.csv("/mnt/hdd/Allez/allez/symbolid2.txt", header = F)[,1]
+
+org.genes <- AnnotationDbi::select(org.Hs.eg.db, keys = genes, keytype = "SYMBOL", columns = c("GO", "SYMBOL"))
+head(org.genes)
+```
+
+
+```{r}
+genes[!(genes %in% org.genes$SYMBOL)]
+```
+
+If we try to map the genes to GO terms, we find 2258 genes which are never mapped to a GO term. 
+
+```{r}
+org.genes <- org.genes[complete.cases(org.genes),]
+# length(genes[!(genes %in% org.genes$SYMBOL)]) # 2258
+# write.table(genes[!(genes %in% org.genes$SYMBOL)], "/mnt/hdd/Allez/allez/missing-genes.txt", row.names = F, col.names = F, sep = ",")
+```
+
+
+Earlier I had a situation where Allez returned even fewer number of gene symbols than were supplied. 
+I've not been able to recreate that error, and don't know how I might have fixed it.
+Probably user error.
+
+```{r}
+scores <- runif(length(genes))
+names(scores) <- genes
+allez.out <- allez::allez(scores, "org.Hs.eg", idtype = "SYMBOL")
+length(unique(allez.out$aux$set.data$gene_id))
+```
+
 # Data Preparation
 
 ## Flu data
@@ -176,7 +211,6 @@ allez.out <- allez.out.all[complete.cases(allez.out.all),]
 rownames(allez.out) <- 1:nrow(allez.out)
 allez.out <- allez.out[order(allez.out$p, decreasing = F),]
 head(allez.out)
-allez.out
 ```
 
 In order for this method to work, you need at least one more part than you have lists. 
@@ -249,8 +283,10 @@ allez.bin
 
 
 ```{r}
-
+allez.out
+allez.bin
 ```
+
 
 
 
