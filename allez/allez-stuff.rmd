@@ -1,0 +1,259 @@
+---
+title: "allez stuff"
+output: html_document
+date: "2024-04-22"
+---
+
+# Data Preparation
+
+## Flu data
+
+For each of 4 influenza variants, for each of 984 genes, contains the number of mutated alleles that variant has.
+
+```{r}
+flu <- read.csv("/mnt/hdd/Allez/allez/fluraw.csv")
+# write.table(flu[,2:5], "/mnt/hdd/Allez/allez/fludata.csv", row.names=F, col.names = F, sep = ",")
+head(flu)
+```
+
+## Gene-Set Map
+
+Here I'm using the human genome data, because I couldn't be bothered to find the influenza equivalent. 
+
+```{r}
+library(dplyr)
+library(org.Hs.eg.db) # I know influenza isn't human, bear with me
+
+genesetmap <- AnnotationDbi::select(org.Hs.eg.db, keys = as.character(flu$Gene_ID), keytype = "ENTREZID", columns = c("GO"))
+
+genesetmap <- genesetmap[complete.cases(genesetmap),]
+
+head(genesetmap)
+```
+
+### Converting gene sets and entrez id's to factors
+
+```{r}
+goidmap <- unique(genesetmap$GO)
+names(goidmap) <- as.numeric(as.factor(goidmap)) - 1
+
+goidmap <- goidmap[as.character(1:length(goidmap) - 1)]
+goidmap <- goidmap[!is.na(goidmap)]
+
+genesetmap$go <- as.numeric(factor(genesetmap$GO)) - 1
+
+# write.table(goidmap, "/mnt/hdd/Allez/allez/flugo.csv", row.names = F, col.names = F, sep = ",")
+head(genesetmap)
+```
+
+
+```{r}
+entrezidmap <- unique(flu$Gene_ID)
+names(entrezidmap) <- as.numeric(as.factor(entrezidmap)) - 1
+
+entrezidmap <- entrezidmap[as.character(1:length(entrezidmap) - 1)]
+
+genesetmap$entrezid <- as.numeric(factor(genesetmap$ENTREZID, levels = entrezidmap)) - 1
+
+write.table(entrezidmap, "/mnt/hdd/Allez/allez/flugenes.csv", row.names = F, col.names = F, sep = ",")
+head(genesetmap)
+```
+
+
+```{r}
+genesetmap <- genesetmap[order(genesetmap$entrezid, genesetmap$go),]
+
+# write.table(genesetmap[,5:6], "/mnt/hdd/Allez/allez/flumap.csv", row.names = F, col.names = F, sep = ",")
+
+head(genesetmap)
+```
+
+
+# Multilist Allez
+
+The multilist Allez will, hopefully, have two methods, mean and variance, just as with the original.
+In fact, I think the variance is even more important in the multilist problem than in the unilist.
+
+## Mean Multilist Allez
+
+For a geneset $T = (t_i)_{i=1}^m\subset\{1,\ldots n\}$, we calculate that set's mean, 
+$$
+\bar X_T = \frac{1}{m}\sum_{i=1}^mX_{t_i}.
+$$
+where $X_i$ are length $p$ vectors representing the score in each list for part $i$.
+
+
+If $T$ is a size $m$ random uniform sample from $1,\ldots n$ without replacement, then we would have
+$$
+\mu_T = \mathbb E \bar X_T = \frac{1}{n}\sum_{i=1}^nX_i,
+$$
+and
+$$
+\Sigma_T :=\mathbb V (\bar X_{T,a}, \bar X_{T,b}) = \frac{n - m}{m(n-1)}\left[\sum_{i=1}^n\left(\frac{X_{a,i}X_{b,i}}{n}\right) - \left(\sum_{i=1}^n\frac{X_{a,i}}{n}\right)\left(\sum_{i=1}^n\frac{X_{b,i}}{n}\right)\right],
+$$
+or, in other words,
+$$
+\mathbb V \bar X_T = \frac{n-m}{m}\hat{\mathbb V} X = \frac{n-m}{m}\hat\Sigma,
+$$
+where $\hat{\mathbb V} \bar X$ is the sample variance-covariance matrix. 
+
+Then we can calculate a "$Z$-score" as 
+$$
+Z_T = \Sigma_T^{-1/2}(\bar X_T - \mu_T),
+$$
+and a Hotelling $t^2$ statistic,
+$$
+t_T^2 = (\bar X_T - \mu_T)'\Sigma_T^{-1}(\bar X_T - \mu_T).
+$$
+
+Under the null that $T$ is a random set, we have
+$$
+\frac{n-p}{p(n-1)}t_T^2 \sim F_{p, n-p}.
+$$
+
+> Note, still need to confirm the above point.
+
+We can then calculate a $p$-value for each geneset $T$.
+
+
+## Variance Multilist Allez
+
+> Note: This one is much newer, and there is much yet to be confirmed
+
+For this section, we assume that our sample covariance follows a (scaled) Wishart distribution.
+
+[This paper](https://www.sciencedirect.com/science/article/abs/pii/S0167947307001053) mentions a $W$-statistic based on the Wald test (cited from Schott, 2001 - the rest of this paper may have a better test, but I have not yet gotten there).
+
+Let $T$ be our geneset as above.
+Then
+$$
+\begin{aligned}
+W_T =& \frac{n}{2}\left[
+  \sum_{\tau\in\{T, T^C\}}\frac{n_\tau}{n}
+    {\rm tr}\left(\hat\Sigma_\tau\hat\Sigma^{-1}\hat\Sigma_\tau\hat\Sigma^{-1}\right)
+  - \sum_{\tau\in\{T,T^C\}}\sum_{\tau'\in\{T,T^C\}}
+    {\rm tr}\left(\hat\Sigma_\tau\hat\Sigma^{-1}\hat\Sigma_{\tau'}\hat\Sigma^{-1}\right)
+
+\right]\\
+  \sim& \chi_{\nu}^2
+\end{aligned}
+$$
+where $\nu = p(p+1)/2$. 
+
+It also proposes one based on a LRT:
+$$
+M = n\log \left|\hat\Sigma\right| - n_T\log\left|\Sigma_T\right| - n_{T^C}\log\left|\Sigma_{T^C}\right|.
+$$
+
+I believe the former is more general, requiring only $n\ge p$, although I'm not sure how that is possible.
+The latter requires both $n_T \ge p$ and $n - n_T \ge p$. 
+For relatively small $p$, I think we'd probably want to cut out small genesets anyway, so, maybe the LRT approach is just better. 
+Or we can offer both options.
+As of this moment, I've only implemented the Wald statistic, and I've not had a chance to check it's accuracy.
+In fact, I'm certain it's wrong in one way - it still forces the gene set to be 
+
+# Running Multilist Allez
+
+I implemented it in Rust mostly because I insist on being a problem, but also to help me understand a bit better what I need the code to be doing.
+
+You should be able to go into the allez Rust package I wrote, run "cargo run" after changing the paths to be correct, and it should run and save the results to "fluresults.csv".
+It is very fast.
+Here are the results ordered by the mean test.
+
+- The "zi"-column is the $z$-score for the ith list.
+- The t-column is the Hotelling $t^2$-statistic.
+- The p-column is the (Bonferroni adjusted) $p$-value corresponding to the $t^2$-statistic
+- The nparts column is the number of parts in that whole (i.e. number of genes in that set)
+- The "sum_scores_i" column is the sum of the scores for the ith list within that set.
+- The m_score-column is the Wald test statistic $W$ (got notation switch around, nbd)
+- The wishart_p-column is the $p$-value from the Wald test
+
+
+```{r}
+allez.out.all <- read.csv("/mnt/hdd/Allez/allez/fluresults.csv")
+allez.na <- allez.out.all[!complete.cases(allez.out.all),]
+allez.out <- allez.out.all[complete.cases(allez.out.all),]
+rownames(allez.out) <- 1:nrow(allez.out)
+allez.out <- allez.out[order(allez.out$p, decreasing = F),]
+head(allez.out)
+allez.out
+```
+
+In order for this method to work, you need at least one more part than you have lists. 
+Thus, only gene sets with at least 5 genes were retained. 
+The rest received a score of NA.
+
+This may not be ideal. 
+We see GO:0061631 has 4 parts, so we can't draw inference. 
+But the 2-4th lists have all 2s for those points, and the first list has no mutations at all. 
+
+```{r}
+# c(min(allez.out$nparts), max(allez.na$nparts)) # (5, 4)
+head(allez.na[order(allez.na$t, decreasing = T),])
+```
+
+
+And here it is ordered by Wald $p$-value.
+I notice that the $p$-values are *very* small. 
+This Wald test finds 166 active gene sets (from among those with $p$-values for the mean) after a Bonferonni correction, while the mean test only found 15!
+This may be a result of error in implementation. 
+It could also be that the variance is indeed a relevant consideration. 
+
+```{r}
+# sum(allez.out$wishart_p < 0.01) # 166
+# sum(allez.out$p < 0.01) # 15
+head(allez.out[order(allez.out$wishart_p),])
+```
+
+
+Using the Wald test enables us to generate $p$-values for some sets which previously could not have gotten them. 
+It finds 39 active genesets which could not have previously been explored. 
+However, I still feel like this is illegal, and need to go back and make sure I'm not being making terrible mistakes.
+
+```{r}
+# sum(allez.na$wishart_p < 0.01) # 39
+head(allez.na[order(allez.na$m_score, decreasing = T),])
+```
+
+
+Using this method, you can sort the different results by which $z$-values are particularly elevated/decreased. 
+For example, if we were wanted to find those "active" gene sets for which the 4th list is particularly unusual, we could do the following.
+Curiously, we don't see very many gene sets with an interesting 4th list. 
+
+```{r}
+allez.sig <- allez.out %>% filter(p < 0.1)
+# nrow(allez.sig) # 17 gene sets have p < 0.1
+
+allez.sig[order(abs(allez.sig$z4), decreasing = T),]
+```
+
+If we look at interesting list 2s, however, we see quite a few more. 
+
+```{r}
+allez.sig[order(abs(allez.sig$z2), decreasing = T),]
+```
+
+I'm a lil worried this has to do with the distribution of 2s vs 1s. 
+So I rerun allez with binary indicators of score > 0. 
+
+```{r}
+# write.table(1 * (flu[,2:5] > 0), "/mnt/hdd/Allez/allez/fludata_bin.csv", row.names=F, col.names = F, sep = ",")
+allez.bin.all <- read.csv("/mnt/hdd/Allez/allez/fluresults_bin.csv")
+allez.bin.na <- allez.bin.all[!complete.cases(allez.bin.all),]
+allez.bin <- allez.bin.all[complete.cases(allez.bin.all),]
+rownames(allez.bin) <- 1:nrow(allez.bin)
+allez.bin <- allez.bin[order(allez.bin$p, decreasing = F),]
+head(allez.bin)
+allez.bin
+```
+
+
+```{r}
+
+```
+
+
+
+
+
+
